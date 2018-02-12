@@ -432,9 +432,9 @@ class IMAP extends MAIL
         $list = imap_getmailboxes($this->_c, $this->_c_host,$pat);
         foreach ($list as $x) {
             if (preg_match('/}(.+)$/', $x->name, $m)) {
-                $tgt_path = $m[1];
+                $tgt_path = imap_utf7_decode($m[1]);
             } else {
-                $tgt_path = $x->name;
+                $tgt_path = imap_utf7_decode($x->name);
             }
             $ret[] = array(
                 'name' => $tgt_path,
@@ -451,7 +451,7 @@ class IMAP extends MAIL
 		$list = imap_getmailboxes($this->_c, $this->_c_host, '*');
 		foreach($list as $x) {
 			if (preg_match('/}(.+)$/', $x->name, $m)) {
-                $ret[] = $m[1];
+                $ret[] = imap_utf7_decode($m[1]);
             }
 		}
 		return $ret;
@@ -463,7 +463,7 @@ class IMAP extends MAIL
         $list = imap_lsub($this->_c, $this->_c_host, '*');
         for($i = 0; $i < count($list); $i++) {
             if(preg_match('/}(.+)$/', $list[$i], $m)) {
-                $ret[] = $m[1];
+                $ret[] = imap_utf7_decode($m[1]);
             }
         }
         return $ret;
@@ -526,13 +526,12 @@ class IMAP extends MAIL
             ->setDraft(($head->Draft == 'X'));
         if(property_exists($head, 'Subject'))
             $message->setSubject($head->Subject);
-
+            
         if(!(property_exists($head, 'message_id'))) {
             echo "\nMessage with subject '" . $message->getSubject() . "' contains no message id\n";
         } else {
             $message->setMessageId($head->message_id);
         }
-        
         if($head->Recent == 'R') {
             $message->setSeen(true)
                 ->setRecent(true);
@@ -568,10 +567,11 @@ class IMAP extends MAIL
 		}
 
 		if(!in_array($p, $this->_mailboxes)) {
+            echo "Creating mailbox: " . imap_utf7_encode($imap_full_path);
 			imap_createmailbox($this->_c, imap_utf7_encode($imap_full_path));
 			$this->_mailboxes[] = $p;
 		}
-        imap_reopen($this->_c, $imap_full_path) or die(implode(", ", imap_errors()));
+        imap_reopen($this->_c, imap_utf7_encode($imap_full_path)) or die(implode(", ", imap_errors()));
         return true;
     }
 
