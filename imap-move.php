@@ -16,110 +16,367 @@ Run Like:
     php ./imap-move.php \
         --source imap-ssl://userA:secret-password@imap.example.com:993/ \
         --target imap-ssl://userB:secret-passwrod@imap.example.com:993/sub-folder \
-        [ --wipe --fake --copy ]
+        [ --wipe --fake ]
 
     --fake to just list what would be copied
-    --wipe to remove messages after they are copied (move)
-    --copy to store copies of the messages in a path
+    --wipe to remove messages after they are copied
+    --once to only copy one e-mail and quit
 
 */
 
+set_time_limit(0);
 error_reporting(E_ALL | E_STRICT);
 
-_args($argc,$argv);
+if($argv === null) { // If $argv is null then use base64 encoded args from $_GET
+    $argv = array_keys($_GET);
+    $arg_cnt = count($argv);
+    $arg_vrs = array();
+    for ($i=0;$i<$arg_cnt;$i++) {
+        switch ($argv[$i]) {
+            case '--source':
+            case '-s':
+            case '--target':
+            case '-t':
+                $arg_vrs[] = $argv[$i];
+                $arg_vrs[] = base64_decode($argv[++$i]);
+                break;
+            default:
+                $arg_vrs[] = $argv[$i];
+        }
+    }
+} else {
+    $arg_cnt = $argc;
+    $arg_vrs = $argv;
+}
 
-echo "Connecting Source...\n";
-$S = new IMAP($_ENV['src']);
+$prog = new MAIN($arg_cnt, $arg_vrs);
 
-echo "Connecting Target...\n";
-$T = new IMAP($_ENV['tgt']);
-//$tgt_path_list = $T->listPath();
-//print_r($tgt_path_list);
+$prog->run();
 
-$src_path_list = $S->listPath();
-// print_r($src_path_list);
-// exit;
+class MESSAGE
+{
+    private $_message_id;
+    private $_date;
+    private $_subject;
+    private $_body;
+    private $_seen;
+    private $_answered;
+    private $_flagged;
+    private $_draft;
+    private $_recent;
+    private $_deleted;
+    private $_size;
+    
+    public function __construct($msg_body = null)
+    {
+        $this->_body = $msg_body;
+        $this->_message_id = '';
+    }
+    
+    public function setMessageId($id)
+    {
+        $this->_message_id = $id;
+        return $this;
+    }
+    
+    public function getMessageId()
+    {
+        return $this->_message_id;
+    }
+    
+    public function setDate($date)
+    {
+        $this->_date = $date;
+        return $this;
+    }
+    
+    public function getDate()
+    {
+        return gmstrftime('%d-%b-%Y %H:%M:%S +0000', $this->_date);
+    }
+    
+    public function setSubject($subject)
+    {
+        $this->_subject = $subject;
+        return $this;
+    }
+    
+    public function getSubject()
+    {
+        return $this->_subject;
+    }
+    
+    public function setBody($body)
+    {
+        $this->_body = $body;
+        return $this;
+    }
+    
+    public function getBody()
+    {
+        return file_get_contents($this->_body);
+    }
+    
+    public function setSeen($seen)
+    {
+        $this->_seen = $seen;
+        return $this;
+    }
+    
+    public function getSeen()
+    {
+        return $this->_seen;
+    }
+    
+    public function setAnswered($answered)
+    {
+        $this->_answered = $answered;
+        return $this;
+    }
+    
+    public function getAnswered()
+    {
+        return $this->_answered;
+    }
+    
+    public function setFlagged($flagged)
+    {
+        $this->_flagged = $flagged;
+        return $this;
+    }
+    
+    public function getFlagged()
+    {
+        return $this->_flagged;
+    }
+    
+    public function setDraft($draft)
+    {
+        $this->_draft = $draft;
+        return $this;
+    }
+    
+    public function getDraft()
+    {
+        return $this->_draft;
+    }
+    
+    public function setRecent($recent)
+    {
+        $this->_recent = $recent;
+        return $this;
+    }
+    
+    public function getRecent()
+    {
+        return $this->_recent;
+    }
+    
+    public function setDeleted($deleted)
+    {
+        $this->_deleted = $deleted;
+        return $this;
+    }
+    
+    public function getDeleted()
+    {
+        return $this->_deleted;
+    }
+    
+    public function setSize($size)
+    {
+        $this->_size = $size;
+        return $this;
+    }
+    
+    public function getSize()
+    {
+        return $this->_size;
+    }
+    
+}
 
-foreach ($src_path_list as $path) {
+abstract class MAIL
+{
+    protected $_tmp_msg_file = 'mail';
+    protected $_mailboxes = array(); 
+    protected $_wipe; // Delete message
+    
+    public function __construct()
+    {
+        $this->_tmp_msg_file = tempnam(getcwd(), 'mail_');
+        $this->_mailboxes = $this->listMailboxes();
+    }
+    public abstract function setPath($p);
+    public abstract function pathStat();
+    public abstract function mailStat($i);
+    public abstract function mailGet($i);
+    public abstract function mailPut($message);
+    public abstract function mailWipe($i);
+    public abstract function listPath($pat='*');
+    public abstract function listMailboxes();
+    public abstract function getSubscribed();
+    public abstract function setSubscribed($p, $subscribe);
+    public abstract function close();
+}
 
-    echo "S: {$path['name']} = {$path['attribute']}\n";
-
-    // Skip Logic Below
-    if (_path_skip($path)) {
-        echo "S: Skip\n";
-        continue;
+class FILE extends MAIL
+{
+    private $_c; // SQLite3 instance
+    private $_c_file; // SQLite3 file
+    private $_path; // Current mail path;
+    
+    /**
+        Connect to SQLite3
+    */
+    public function __construct($uri, $wipe = false)
+    {
+        $this->_c = null;
+        $this->_wipe = $wipe;
+	$this->_c_file = $uri['host'];
+        echo "SQLite3:open($this->_c_file)\n";
+        $this->_c = new SQLite3($this->_c_file);
+        $this->_c->exec('CREATE TABLE IF NOT EXISTS mail(path, message_id, date, subject, body, seen, answered, flagged, draft, recent, deleted, size);');
+        $this->_c->exec('CREATE TABLE IF NOT EXISTS mailbox(date, path, size, check_date, check_mail_count, check_path, subscribed);');
+		parent::__construct();
+    }
+    
+    public function getSubscribed()
+    {
+        $result = $this->_c->query(
+            sprintf('SELECT path FROM mailbox WHERE subscribed=\'%d\'', 1));
+        $res = array();
+        while($row = $result->fetchArray()) {
+            $res[] = array(
+                'name' => $row['path']
+            );
+        }
     }
 
-    // Source Path
-    $S->setPath($path['name']);
-    $src_path_stat = $S->pathStat();
-    // print_r($src_path_stat);
-    if (empty($src_path_stat['mail_count'])) {
-        echo "S: Skip {$src_path_stat['mail_count']} messages\n";
-        continue;
+    public function setSubscribed($p, $subscribe = true)
+    {
+        $result = $this->_c->query(
+            sprintf('UPDATE mailbox SET subscribed=\'$d\' WHERE path=\'$s\'', ($subscribe?1:0), $p));
     }
-    echo "S: {$src_path_stat['mail_count']} messages\n";
-
-    // Target Path
-    $tgt_path = _path_map($path['name']);
-    echo "T: Indexing: $tgt_path\n";
-    $T->setPath($tgt_path); // Creates if needed
-    // Show info on Target
-    $tgt_path_stat = $T->pathStat();
-    echo "T: {$tgt_path_stat['mail_count']} messages\n";
-    // Build Index of Target
-    $tgt_mail_list = array();
-    for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
-        $mail = $T->mailStat($i);
-        $tgt_mail_list[ $mail['message_id'] ] = !empty($mail['subject']) ? $mail['subject'] : "[ No Subject ] Message $i";
+    
+    public function listPath($pat='*')
+    {
+        $result = $this->_c->query('SELECT path FROM mailbox');
+        $res = array();
+        while($row = $result->fetchArray()) {
+            $res[] = array(
+                'name' => $row['path'],
+                'attribute' => 64
+            );
+        }
+        return $res;
     }
 
-    // print_r($tgt_mail_list);
-
-    // for ($src_idx=1;$src_idx<=$src_path_stat['mail_count'];$src_idx++) {
-    for ($src_idx=$src_path_stat['mail_count'];$src_idx>=1;$src_idx--) {
-
-        $stat = $S->mailStat($src_idx);
-        $stat['answered'] = trim($stat['Answered']);
-        $stat['unseen'] = trim($stat['Unseen']);
-        if (empty($stat['subject'])) $stat['subject'] = "[ No Subject ] Message $src_idx";
-        // print_r($stat['message_id']); exit;
-
-        if (array_key_exists($stat['message_id'],$tgt_mail_list)) {
-            echo "S:$src_idx Mail: {$stat['subject']} Copied Already\n";
-            $S->mailWipe($i);
-            continue;
+	public function listMailboxes()
+	{
+		$result = $this->_c->query('SELECT path FROM mailbox');
+		$res = array();
+		while($row = $result->fetchArray())
+			$res[] = $row['path'];
+		return $res;
+	}
+    
+    public function setPath($p)
+    {
+        $this->_path = imap_utf7_decode($p);
+        $res = $this->_c->querySingle(sprintf('SELECT path FROM mailbox WHERE path=\'%s\'', $this->_c->escapeString($p)));
+        if($res == null) {
+            $this->_c->exec(
+                sprintf('INSERT INTO mailbox (path) VALUES (\'%s\');', $this->_c->escapeString($this->_path))
+            );
         }
-
-        echo "S:$src_idx {$stat['subject']} ({$stat['MailDate']})\n   {$src_path_stat['path']} => ";
-        if ($_ENV['fake']) {
-            echo "\n";
-            continue;
+        return true;
+    }
+    
+    public function pathStat()
+    {
+        $res = array();
+        $result = $this->_c->querySingle(sprintf('SELECT count(*) AS mail_count FROM mail WHERE path=\'%s\';', $this->_c->escapeString($this->_path)));
+        $res['mail_count'] = $result;
+        return $res;
+    }
+    
+    public function mailStat($i, $message = null)
+    {
+        if(!$message instanceof MESSAGE)
+            $message = new MESSAGE();
+        $result = $this->_c->querySingle(
+            sprintf('SELECT path, message_id, subject, date, seen, answered, flagged, draft, recent, deleted, size FROM mail WHERE path=\'%s\' LIMIT %d, 1;', 
+                $this->_c->escapeString($this->_path), 
+                $i - 1), 
+            true);
+        //$result = $this->_c->querySingle('SELECT * FROM mail', true);
+        $message->setMessageId($result['message_id'])
+            ->setDate(strtotime($result['date']))
+            ->setSubject($result['subject'])
+            ->setSeen($result['seen'])
+            ->setAnswered($result['answered'])
+            ->setFlagged($result['flagged'])
+            ->setDraft($result['draft'])
+            ->setRecent($result['recent'])
+            ->setDeleted($result['deleted']);
+        return $message;
+    }
+    
+    public function mailGet($i, $message = null)
+    {
+        if(!$message instanceof MESSAGE)
+            $message = new MESSAGE();
+        $result = $this->_c->querySingle(
+            sprintf('SELECT body FROM mail WHERE path=\'%s\' LIMIT %d, 1;',
+                $this->_c->escapeString($this->_path),
+                $i - 1));
+        file_put_contents($this->_tmp_msg_file, $result);
+        $message->setBody($this->_tmp_msg_file);
+        return $message;
+    }
+    
+    public function mailPut($message)
+    {
+        return $this->_c->exec(
+            sprintf('INSERT INTO mail (path, message_id, date, subject, body, seen, answered, flagged, draft, recent, deleted, size) 
+                VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\');', 
+                $this->_c->escapeString($this->_path), 
+                $this->_c->escapeString($message->getMessageId()), 
+                $this->_c->escapeString($message->getDate()), 
+                $this->_c->escapeString($message->getSubject()), 
+                $this->_c->escapeString($message->getBody()),
+                $this->_c->escapeString($message->getSeen()),
+                $this->_c->escapeString($message->getAnswered()),
+                $this->_c->escapeString($message->getFlagged()),
+                $this->_c->escapeString($message->getDraft()),
+                $this->_c->escapeString($message->getRecent()),
+                $this->_c->escapeString($message->getDeleted()),
+                $this->_c->escapeString($message->getSize())
+        ));
+    }
+    
+    public function mailWipe($i)
+    {
+        $res = false;
+        if($this->_wipe) {
+            $res = $this->_c->exec(
+        	   sprintf('DELETE FROM mail LIMIT %d, 1;', $i - 1)
+            );
         }
-
-        $S->mailGet($src_idx);
-        $opts = array();
-        if (empty($stat['unseen'])) $opts[] = '\Seen';
-        if (!empty($stat['answered'])) {
-            $opts[] = '\Answered';
-        }
-        $opts = implode(' ',$opts);
-        $date = strftime('%d-%b-%Y %H:%M:%S +0000',strtotime($stat['MailDate']));
-
-        if ($res = $T->mailPut(file_get_contents('mail'),$opts,$date)) {
-            // echo "T: $res\n";
-            $S->mailWipe($src_idx);
-            echo "{$tgt_path_stat['path']}\n";
-        } else {
-            die("Fail to Put $res\n");
-        }
-
-        if ($_ENV['once']) die("--one and done\n");
-
+        return $res;
+    }
+    
+    /**
+        Closes the database file
+     */
+    public function close()
+    {
+        $this->_c->close();
     }
 }
 
-class IMAP
+class IMAP extends MAIL
 {
     private $_c; // Connection Handle
     private $_c_host; // Server Part {}
@@ -127,22 +384,25 @@ class IMAP
     /**
         Connect to an IMAP
     */
-    function __construct($uri)
+    public function __construct($uri, $wipe = false, $readonly = false)
     {
         $this->_c = null;
+        $this->_wipe = $wipe;
         $this->_c_host = sprintf('{%s',$uri['host']);
         if (!empty($uri['port'])) {
-            $this->_c_host.= sprintf(':%d',$uri['port']);
+            $this->_c_host .= sprintf(':%d',$uri['port']);
         }
         switch (strtolower(@$uri['scheme'])) {
-        case 'imap-ssl':
-            $this->_c_host.= '/ssl';
-            break;
-        case 'imap-tls':
-            $this->_c_host.= '/tls';
-            break;
-        default:
+            case 'imap-ssl':
+                $this->_c_host .= '/ssl/novalidate-cert';
+                break;
+            case 'imap-tls':
+                $this->_c_host .= '/tls/novalidate-cert';
+                break;
+            default:
         }
+        if($readonly)
+            $this->_c_host .= '/readonly';
         $this->_c_host.= '}';
 
         $this->_c_base = $this->_c_host;
@@ -154,21 +414,30 @@ class IMAP
             }
         }
         echo "imap_open($this->_c_host)\n";
-        $this->_c = imap_open($this->_c_host,$uri['user'],$uri['pass']);
-        // echo implode(', ',imap_errors());
+        $this->_c = imap_open($this->_c_host,$uri['user'],base64_decode($uri['pass']));
+        if(!is_resource($this->_c)) {
+            echo implode(', ',imap_errors());
+            echo "Could not open " . $this->_c_host;
+            exit;
+        }
+        parent::__construct();
     }
-
     /**
         List folders matching pattern
         @param $pat * == all folders, % == folders at current level
     */
-    function listPath($pat='*')
+    public function listPath($pat='*')
     {
         $ret = array();
         $list = imap_getmailboxes($this->_c, $this->_c_host,$pat);
         foreach ($list as $x) {
+            if (preg_match('/}(.+)$/', $x->name, $m)) {
+                $tgt_path = $m[1];
+            } else {
+                $tgt_path = $x->name;
+            }
             $ret[] = array(
-                'name' => $x->name,
+                'name' => $tgt_path,
                 'attribute' => $x->attributes,
                 'delimiter' => $x->delimiter,
             );
@@ -176,40 +445,104 @@ class IMAP
         return $ret;
     }
 
+	public function listMailboxes()
+	{
+		$ret = array();
+		$list = imap_getmailboxes($this->_c, $this->_c_host, '*');
+		foreach($list as $x) {
+			if (preg_match('/}(.+)$/', $x->name, $m)) {
+                $ret[] = $m[1];
+            }
+		}
+		return $ret;
+    }
+    
+    public function getSubscribed()
+    {
+        $ret = array();
+        $list = imap_lsub($this->_c, $this->_c_host, '*');
+        for($i = 0; $i < count($list); $i++) {
+            if(preg_match('/}(.+)$/', $list[$i], $m)) {
+                $ret[] = $m[1];
+            }
+        }
+        return $ret;
+    }
+
     /**
         Get a Message
     */
-    function mailGet($i)
+    public function mailGet($i, $message = null)
     {
+        if(!$message instanceof MESSAGE)
+            $message = new MESSAGE();
         // return imap_body($this->_c,$i,FT_PEEK);
-        return imap_savebody($this->_c,'mail',$i,null,FT_PEEK);
+        imap_savebody($this->_c, $this->_tmp_msg_file, $i, null, FT_PEEK);
+        $message->setBody($this->_tmp_msg_file);
+        return $message;
     }
 
     /**
         Store a Message with proper date
     */
-    function mailPut($mail,$opts,$date)
+    public function mailPut($message)
     {
         $stat = $this->pathStat();
-        // print_r($stat);
-        // $opts = '\\Draft'; // And Others?
-        // $opts = null;
-        // exit;
-        $ret = imap_append($this->_c,$stat['check_path'],$mail,$opts,$date);
-        if ($buf = imap_errors()) {
-            die(print_r($buf,true));
-        }
+        $opts = array();
+        if($message->getSeen())
+            $opts[] = '\Seen';
+        if($message->getAnswered())
+            $opts[] = '\Answered';
+        if($message->getFlagged())
+            $opts[] = '\Flagged';
+        if($message->getDeleted())
+            $opts[] = '\Deleted';
+        if($message->getDraft())
+            $opts[] = '\Draft';
+        if($message->getRecent())
+            $opts[] = '\Recent';
+        $ret = imap_append($this->_c, $stat['check_path'], $message->getBody(), implode(' ',$opts), $message->getDate());
+        print_r(imap_errors());
         return $ret;
 
     }
 
     /**
         Message Info
+        @param $i
+        @param $message MESSAGE
+        @return MESSAGE
     */
-    function mailStat($i)
+    public function mailStat($i, $message = null)
     {
+        if(!$message instanceof MESSAGE)
+            $message = new MESSAGE();
         $head = imap_headerinfo($this->_c,$i);
-        return (array)$head;
+        $message->setDate(strtotime($head->MailDate))
+            ->setSeen($head->Unseen != 'U')
+            ->setAnswered(($head->Answered == 'A'))
+            ->setFlagged(($head->Flagged == 'F'))
+            ->setDeleted(($head->Deleted == 'D'))
+            ->setDraft(($head->Draft == 'X'));
+        if(property_exists($head, 'Subject'))
+            $message->setSubject($head->Subject);
+
+        if(!(property_exists($head, 'message_id'))) {
+            echo "\nMessage with subject '" . $message->getSubject() . "' contains no message id\n";
+        } else {
+            $message->setMessageId($head->message_id);
+        }
+        
+        if($head->Recent == 'R') {
+            $message->setSeen(true)
+                ->setRecent(true);
+        } elseif($head->Recent == 'N') {
+            $message->setSeen(false)
+                ->setRecent(true);
+        }
+        
+        return $message;
+        //return (array)$head;
         // $stat = imap_fetch_overview($this->_c,$i);
         // return (array)$stat[0];
     }
@@ -217,47 +550,50 @@ class IMAP
     /**
         Immediately Delete and Expunge the message
     */
-    function mailWipe($i)
+    public function mailWipe($i)
     {
-        if ( ($_ENV['wipe']) && (imap_delete($this->_c,$i)) ) return imap_expunge($this->_c);
+        if ( ($this->_wipe) && (imap_delete($this->_c,$i)) ) return imap_expunge($this->_c);
     }
 
     /**
-        Sets the Current Mailfolder, Creates if Needed
+        Sets the Current Mailfolder
     */
-    function setPath($p,$make=false)
+    public function setPath($p)
     {
-        // echo "setPath($p);\n";
+		if (substr($p,0,1)!='{') {
+			if($p == 'inbox')
+				$imap_full_path = $this->_c_host;
+			else
+				$imap_full_path = $this->_c_host . trim($p,'/');
+		}
+
+		if(!in_array($p, $this->_mailboxes)) {
+			imap_createmailbox($this->_c, imap_utf7_encode($imap_full_path));
+			$this->_mailboxes[] = $p;
+		}
+        imap_reopen($this->_c, $imap_full_path) or die(implode(", ", imap_errors()));
+        return true;
+    }
+
+    public function setSubscribed($p, $subscribe = true)
+    {
         if (substr($p,0,1)!='{') {
-            $p = $this->_c_host . trim($p,'/');
+			if($p == 'inbox')
+				$imap_full_path = $this->_c_host;
+			else
+				$imap_full_path = $this->_c_host . trim($p,'/');
         }
-        // echo "setPath($p);\n";
-
-        $ret = imap_reopen($this->_c,$p); // Always returns true :(
-        $buf = imap_errors();
-        if (empty($buf)) {
-            return true;
-        }
-
-        $buf = implode(', ',$buf);
-        if (preg_match('/NONEXISTENT/',$buf)) {
-            // Likley Couldn't Open on Gmail Side, So Create
-            $ret = imap_createmailbox($this->_c,$p);
-            $buf = imap_errors();
-            if (empty($buf)) {
-                // Reopen Again
-                imap_reopen($this->_c,$p);
-                return true;
-            }
-            die(print_r($buf,true)."\nFailed to Create setPath($p)\n");
-        }
-        die(print_r($buf,true)."\nFailed to Switch setPath($p)\n");
+        
+        if($subscribe)
+            return imap_subscribe($this->_c, imap_utf7_encode($imap_full_path));
+        else
+            return imap_unsubscribe($this->_c, imap_utf7_encode($imap_full_path));
     }
 
     /**
         Returns Information about the current Path
     */
-    function pathStat()
+    public function pathStat()
     {
         $res = imap_mailboxmsginfo($this->_c);
         $ret = array(
@@ -273,125 +609,265 @@ class IMAP
         // $ret = array_merge($ret,$res);
         return $ret;
     }
+    
+    /**
+        Closes the connection
+     */
+    public function close()
+    {
+        imap_close($this->_c);
+        if(file_exists($this->_tmp_msg_file))
+            unlink($this->_tmp_msg_file);
+    }
 }
 
-/**
-    Process CLI Arguments
-*/
-function _args($argc,$argv)
-{
+class MAIN {
+    private $src;
+    private $tgt;
+    private $fake;
+    private $wipe;
+    private $once;
 
-    $_ENV['src'] = null;
-    $_ENV['tgt'] = null;
-    $_ENV['copy'] = false;
-    $_ENV['fake'] = false;
-    $_ENV['once'] = false;
-    $_ENV['wipe'] = false;
+    public function __construct($argc, $argv)
+    {
+        $src = null;
+        $tgt = null;
+        $fake = false;
+        $once = false;
+        $wipe = false;
+        $this->_args($argc,$argv);
+    }
 
-    for ($i=1;$i<$argc;$i++) {
-        switch ($argv[$i]) {
-        case '--source':
-        case '-s':
-            $i++;
-            if (!empty($argv[$i])) {
-                $_ENV['src'] = parse_url($argv[$i]);
+    public function run() {
+
+        echo "Connecting Source...\n";
+        $S = $this->_mail_conn($this->src, !$this->wipe);
+
+        echo "Connecting Target...\n";
+        $T = $this->_mail_conn($this->tgt);
+
+        $src_path_list = $S->listPath();
+        $dst_path_list = $T->listPath();
+        $src_subscribed_list = $S->getSubscribed();
+        $dst_subscribed_list = $T->getSubscribed();
+
+        echo "Source subscribed list: " . implode(", ", $src_subscribed_list) . "\n";
+        echo "Target subscribed list: " . implode(", ", $dst_subscribed_list) . "\n";
+
+        foreach ($src_path_list as $path) {
+
+            echo "S: path {$path['name']} = {$path['attribute']}\n";
+
+            // Skip Logic Below
+            if ($this->_path_skip($path)) {
+                echo "S: skip {$path['name']}\n";
+                continue;
             }
-            break;
-        case '--target':
-        case '-t': // Destination
-            $i++;
-            if (!empty($argv[$i])) {
-                $_ENV['tgt'] = parse_url($argv[$i]);
+
+            // Source Path
+            $S->setPath($path['name']);
+            $src_path_stat = $S->pathStat();
+            
+            echo "S: {$src_path_stat['mail_count']} messages\n";
+            if (empty($src_path_stat['mail_count'])) {
+                echo "S: skip\n";
+                continue;
             }
-            break;
-        case '--copy':
-            // Given a Path to Copy To?
-            $chk = $argv[$i+1];
-            if (substr($chk,0,1)!='-') {
-                $_ENV['copy_path'] = $chk;
-                if (!is_dir($chk)) {
-                    echo "Creating Copy Directory\n";
-                    mkdir($chk,0755,true);
+
+            // Target Path
+            $tgt_path = null;
+            if (preg_match('/}(.+)$/', $path['name'], $m)) {
+                $tgt_path = $m[1];
+            } else {
+                $tgt_path = $path['name'];
+            }
+            $T->setPath($tgt_path); // Creates if needed
+
+            // Show info on Target
+            $tgt_path_stat = $T->pathStat();
+            echo "T: {$tgt_path_stat['mail_count']} messages\n";
+
+            // Build Index of Target
+            echo "T: Indexing....\n";
+            $tgt_mail_list = array();
+            $tgt_mail_list_no_subject = array();
+            for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
+                $message = $T->mailStat($i);
+                if(strlen($message->getMessageId()) > 0)
+                    $tgt_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
+                else
+                    $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
+            }
+            // print_r($tgt_mail_list);
+            // for ($i=1;$i<=$src_path_stat['mail_count'];$i++) {
+            $copied = 0;
+            for ($i=$src_path_stat['mail_count'];$i>=1;$i--) {
+                $message = $S->mailStat($i);
+                
+                if(strlen($message->getMessageId()) > 0 ) {
+                    if (array_key_exists($message->getMessageId(), $tgt_mail_list)) {
+                        //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
+                        echo "-";
+                        if($this->wipe)
+                            $S->mailWipe($i);
+                        continue;
+                    }
+                } else {
+                    // There is no message ID. Find message on Date and Subject
+                    if (array_key_exists($message->getDate(), $tgt_mail_list_no_subject)) {
+                        //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
+                        echo "-";
+                        if($this->wipe)
+                            $S->mailWipe($i);
+                        continue;
+                            
+                    }
                 }
-                $i++;
+
+                // echo "S: {$message->getSubject()} {$message->getDate()}\n";
+
+                $message = $S->mailGet($i, $message);
+                $opts = array();
+
+                if ($this->fake) {
+                    continue;
+                }
+                
+                $res = $T->mailPut($message);
+                // echo "T: $res\n";
+                $copied++;
+                echo ".";
+                if(($copied % 20) == 0)
+                    if( ob_get_level() > 0 ) ob_flush();
+                if($this->wipe)
+                    $S->mailWipe($i);
+
+                if ($this->once) {
+                    $S->close();
+                    $T->close();
+                    die("--one and done\n");
+                }
+
             }
-            break;
-        case '--fake':
-            $_ENV['fake'] = true;
-            break;
-        case '--once':
-            $_ENV['once'] = true;
-            break;
-        case '--wipe':
-            $_ENV['wipe'] = true;
-            break;
-        default:
-            echo "arg: {$argv[$i]}\n";
+            
+            echo "\nCopied $copied messages to $tgt_path \n";
+
+            if(!$this->fake && in_array($path['name'], $src_subscribed_list) && !in_array($path['name'], $dst_subscribed_list)) {
+                $T->setSubscribed($path['name']);
+            }
+            
+        }
+
+        $S->close();
+        $T->close();
+    }
+
+    /**
+     Process CLI Arguments
+     */
+    function _args($argc,$argv)
+    {
+        for ($i=1;$i<$argc;$i++) {
+            switch ($argv[$i]) {
+            	case '--source':
+            	case '-s':
+            	    $i++;
+            	    if (!empty($argv[$i])) {
+            	        $this->src = parse_url($argv[$i]);
+            	    }
+            	    break;
+            	case '--target':
+            	case '-t': // Destination
+            	    $i++;
+            	    if (!empty($argv[$i])) {
+            	        $this->tgt = parse_url($argv[$i]);
+            	    }
+            	    break;
+            	case '--fake':
+            	    $this->fake = true;
+            	    break;
+            	case '--once':
+            	    $this->once = true;
+            	    break;
+            	case '--wipe':
+            	    $this->wipe = true;
+            	    break;
+            	default:
+            	    echo "arg: {$argv[$i]}\n";
+            }
+        }
+
+        if ( (empty($this->src['path'])) || ($this->src['path']=='/') ) {
+            $this->src['path'] = '/INBOX';
+        }
+        if ( (empty($this->tgt['path'])) || ($this->tgt['path']=='/') ) {
+            $this->tgt['path'] = '/INBOX';
         }
     }
 
-    if ( (empty($_ENV['src']['path'])) || ($_ENV['src']['path']=='/') ) {
-        $_ENV['src']['path'] = '/INBOX';
-    }
-    if ( (empty($_ENV['tgt']['path'])) || ($_ENV['tgt']['path']=='/') ) {
-        $_ENV['tgt']['path'] = '/INBOX';
-    }
-}
-
-/**
-    @return mapped path name
-*/
-function _path_map($x)
-{
-    if (preg_match('/}(.+)$/',$x,$m)) {
-        switch (strtolower($m[1])) {
-        // case 'inbox':         return null;
-        case 'deleted items': return '[Gmail]/Trash';
-        case 'drafts':        return '[Gmail]/Drafts';
-        case 'junk e-mail':   return '[Gmail]/Spam';
-        case 'sent items':    return '[Gmail]/Sent Mail';
-        }
-        $x = str_replace('INBOX/',null,$m[1]);
-    }
-    return $x;
-}
-
-/**
+    /**
     @return true if we should skip this path
-*/
-function _path_skip($path)
-{
-    if ( ($path['attribute'] & LATT_NOSELECT) == LATT_NOSELECT) {
-        return true;
-    }
-    // All Mail, Trash, Starred have this attribute
-    if ( ($path['attribute'] & 96) == 96) {
-        return true;
+    */
+    protected function _path_skip($path)
+    {
+        $ret = false;
+        if ( ($path['attribute'] & LATT_NOSELECT) == LATT_NOSELECT) {
+            $ret = true;
+        }
+        // All Mail, Trash, Starred have this attribute
+        if ( ($path['attribute'] & 96) == 96) {
+            $ret = true;
+        }
+        // Skip by Pattern
+        if (preg_match('/}(.+)$/',$path['name'],$m)) {
+            switch ($m[1]) {
+            	case '[Gmail]/All Mail':
+            	case '[Gmail]/Sent Mail':
+            	case '[Gmail]/Spam':
+            	case '[Gmail]/Starred':
+            	    $ret = true;
+            	    break;
+            }
+        }
+
+        return $ret;
     }
 
-    // Skip by Pattern
-    if (preg_match('/}(.+)$/',$path['name'],$m)) {
-        switch (strtolower($m[1])) {
-        case '[gmail]/all mail':
-        case '[gmail]/sent mail':
-        case '[gmail]/spam':
-        case '[gmail]/starred':
-            return true;
+    protected function _mail_conn($uri, $readonly = false)
+    {
+        switch(strtolower(@$uri['scheme'])) {
+        	case 'imap-ssl':
+        	case 'imap-tls':
+        	    return new IMAP($uri, $this->wipe, $readonly);
+        	    break;
+        	case 'file':
+        	    return new FILE($uri, $this->wipe);
+        	    break;
+        	default:
+        	    die(self::_usage(sprintf('Invalid scheme \'%s\'', $uri['scheme'])));
         }
     }
 
-    // By First Folder Part of Name
-    if (preg_match('/}([^\/]+)/',$path['name'],$m)) {
-        switch (strtolower($m[1])) {
-        // This bundle is from Exchange
-        case 'journal':
-        case 'notes':
-        case 'outbox':
-        case 'rss feeds':
-        case 'sync issues':
-            return true;
-        }
-    }
+    public static function _usage($message = '')
+    {
+        return sprintf('%s
 
-    return false;
+        Usage:
+        php ./imap-move.php \
+            --source <URI> \
+            --target <URI> \
+            [ --wipe --fake --once ]
+
+        --fake to just list what would be copied
+        --wipe to remove messages after they are copied
+        --once to only copy one message then exit
+
+        URI = (imap-ssl | imap-tls)://user:password@imap.example.com:993/[ folder ]
+              (file: | file:///<FULLPATH>)filename.db
+
+	Password is base64 encoded
+'
+            , $message);
+    }
 }
+
