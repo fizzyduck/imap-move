@@ -16,11 +16,12 @@ Run Like:
     php ./imap-move.php \
         --source imap-ssl://userA:secret-password@imap.example.com:993/ \
         --target imap-ssl://userB:secret-passwrod@imap.example.com:993/sub-folder \
-        [ --wipe --fake ]
+        [ [ --wipe | --sync ] | --fake | --once ]
 
     --fake to just list what would be copied
     --wipe to remove messages after they are copied
     --once to only copy one e-mail and quit
+    --sync to sync source and target
 
 */
 
@@ -478,6 +479,10 @@ class IMAP extends MAIL
             $message = new MESSAGE();
         // return imap_body($this->_c,$i,FT_PEEK);
         imap_savebody($this->_c, $this->_tmp_msg_file, $i, null, FT_PEEK);
+        $errors = imap_errors();
+        if(count($errors)) {
+            print_r($errors);
+        }
         $message->setBody($this->_tmp_msg_file);
         return $message;
     }
@@ -499,8 +504,8 @@ class IMAP extends MAIL
             $opts[] = '\Deleted';
         if($message->getDraft())
             $opts[] = '\Draft';
-        if($message->getRecent())
-            $opts[] = '\Recent';
+        //if($message->getRecent()) // Recent is a read-only property
+        //    $opts[] = '\Recent';
         $ret = imap_append($this->_c, $stat['check_path'], $message->getBody(), implode(' ',$opts), $message->getDate());
         print_r(imap_errors());
         return $ret;
@@ -527,9 +532,10 @@ class IMAP extends MAIL
         if(property_exists($head, 'Subject'))
             $message->setSubject($head->Subject);
             
-        if(!(property_exists($head, 'message_id'))) {
-            echo "\nMessage with subject '" . $message->getSubject() . "' contains no message id\n";
-        } else {
+        #if(!(property_exists($head, 'message_id'))) {
+        #    echo "\nMessage with subject '" . $message->getSubject() . "' contains no message id\n";
+        #} else {
+        if((property_exists($head, 'message_id'))) {
             $message->setMessageId($head->message_id);
         }
         if($head->Recent == 'R') {
@@ -627,6 +633,7 @@ class MAIN {
     private $fake;
     private $wipe;
     private $once;
+    private $sync;
 
     public function __construct($argc, $argv)
     {
@@ -635,6 +642,7 @@ class MAIN {
         $fake = false;
         $once = false;
         $wipe = false;
+        $sync = false;
         $this->_args($argc,$argv);
     }
 
@@ -688,26 +696,31 @@ class MAIN {
             echo "T: {$tgt_path_stat['mail_count']} messages\n";
 
             // Build Index of Target
-            echo "T: Indexing....\n";
+            echo "T: Indexing:       ";
             $tgt_mail_list = array();
             $tgt_mail_list_no_subject = array();
             for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
+                echo "\033[6D";
+                echo str_pad($i, 6, ' ', STR_PAD_RIGHT);
                 $message = $T->mailStat($i);
                 if(strlen($message->getMessageId()) > 0)
                     $tgt_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
                 else
                     $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
             }
+            echo "\n";
             // print_r($tgt_mail_list);
             // for ($i=1;$i<=$src_path_stat['mail_count'];$i++) {
             $copied = 0;
+            $skipped = 0;
             for ($i=$src_path_stat['mail_count'];$i>=1;$i--) {
                 $message = $S->mailStat($i);
                 
                 if(strlen($message->getMessageId()) > 0 ) {
                     if (array_key_exists($message->getMessageId(), $tgt_mail_list)) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
-                        echo "-";
+                        $skipped++;
+                        self::print_progress($copied, $skipped);
                         if($this->wipe)
                             $S->mailWipe($i);
                         continue;
@@ -716,11 +729,11 @@ class MAIN {
                     // There is no message ID. Find message on Date and Subject
                     if (array_key_exists($message->getDate(), $tgt_mail_list_no_subject)) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
-                        echo "-";
+                        $skipped++;
+                        self::print_progress($copied, $skipped);
                         if($this->wipe)
                             $S->mailWipe($i);
                         continue;
-                            
                     }
                 }
 
@@ -729,6 +742,9 @@ class MAIN {
                 $message = $S->mailGet($i, $message);
                 $opts = array();
 
+                //if(!$message instanceof MESSAGE)
+                //    continue;
+
                 if ($this->fake) {
                     continue;
                 }
@@ -736,7 +752,7 @@ class MAIN {
                 $res = $T->mailPut($message);
                 // echo "T: $res\n";
                 $copied++;
-                echo ".";
+                self::print_progress($copied, $skipped);
                 if(($copied % 20) == 0)
                     if( ob_get_level() > 0 ) ob_flush();
                 if($this->wipe)
@@ -751,9 +767,14 @@ class MAIN {
             }
             
             echo "\nCopied $copied messages to $tgt_path \n";
+            echo "Skipped $skipped messages \n";
 
             if(!$this->fake && in_array($path['name'], $src_subscribed_list) && !in_array($path['name'], $dst_subscribed_list)) {
                 $T->setSubscribed($path['name']);
+            }
+
+            if($this->sync) {
+                // Delete message from target that doesn't exist in source
             }
             
         }
@@ -791,11 +812,17 @@ class MAIN {
             	    break;
             	case '--wipe':
             	    $this->wipe = true;
-            	    break;
+                    break;
+                case '--sync':
+                    $this->sync = true;
+                    break;
             	default:
             	    echo "arg: {$argv[$i]}\n";
             }
         }
+
+        if($this->sync && $this->wipe)
+            die("--sync and --wipe are mutually exclusive");
 
         if ( (empty($this->src['path'])) || ($this->src['path']=='/') ) {
             $this->src['path'] = '/INBOX';
@@ -856,11 +883,12 @@ class MAIN {
         php ./imap-move.php \
             --source <URI> \
             --target <URI> \
-            [ --wipe --fake --once ]
+            [ [ --wipe | --sync ] | --fake | --once ]
 
         --fake to just list what would be copied
         --wipe to remove messages after they are copied
         --once to only copy one message then exit
+        --sync to sync source and target
 
         URI = (imap-ssl | imap-tls)://user:password@imap.example.com:993/[ folder ]
               (file: | file:///<FULLPATH>)filename.db
@@ -868,6 +896,13 @@ class MAIN {
 	Password is base64 encoded
 '
             , $message);
+    }
+
+    public static function print_progress($copied, $skipped)
+    {
+        // Copied: ...... Skipped: ......
+        echo "\033[30D";
+        echo "Copied: " . str_pad($copied, 6, ' ', STR_PAD_RIGHT) . " Skipped: " . str_pad($skipped, 6, ' ', STR_PAD_RIGHT);        
     }
 }
 
