@@ -704,19 +704,22 @@ class MAIN {
                 echo str_pad($i, 6, ' ', STR_PAD_RIGHT);
                 $message = $T->mailStat($i);
                 if(strlen($message->getMessageId()) > 0)
-                    $tgt_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
+                    $tgt_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
                 else
-                    $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate());
+                    $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
             }
             echo "\n";
             // print_r($tgt_mail_list);
             // for ($i=1;$i<=$src_path_stat['mail_count'];$i++) {
             $copied = 0;
             $skipped = 0;
+            $src_mail_list = array();
+            $src_mail_list_no_subject = array();
             for ($i=$src_path_stat['mail_count'];$i>=1;$i--) {
                 $message = $S->mailStat($i);
                 
                 if(strlen($message->getMessageId()) > 0 ) {
+                    $src_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
                     if (array_key_exists($message->getMessageId(), $tgt_mail_list)) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
@@ -726,6 +729,7 @@ class MAIN {
                         continue;
                     }
                 } else {
+                    $src_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
                     // There is no message ID. Find message on Date and Subject
                     if (array_key_exists($message->getDate(), $tgt_mail_list_no_subject)) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
@@ -773,8 +777,24 @@ class MAIN {
                 $T->setSubscribed($path['name']);
             }
 
-            if($this->sync) {
+            $deleted = 0;
+            if($this->sync && (($tgt_path_stat['mail_count'] + $copied) > $src_path_stat['mail_count'] )) {
                 // Delete message from target that doesn't exist in source
+                foreach($tgt_mail_list as $key => $value) {
+                    if(!array_key_exists($key, $src_mail_list)) {
+                        //echo "Message with subject: " . $value['Subject'] . " does not exist in source";
+                        $T->mailWipe($value['Position']);
+                        $deleted++;
+                    }
+                }
+                foreach($tgt_mail_list_no_subject as $key => $value) {
+                    if(!array_key_exists($key, $src_mail_list_no_subject)) {
+                        echo "Message with date: " . $value['Date'] . " does not exist in source";
+                        $T->mailWipe($value['Position']);
+                        $deleted++;
+                    }
+                }
+                echo "Deleted $deleted messages \n";
             }
             
         }
