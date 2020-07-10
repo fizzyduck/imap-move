@@ -480,7 +480,7 @@ class IMAP extends MAIL
         // return imap_body($this->_c,$i,FT_PEEK);
         imap_savebody($this->_c, $this->_tmp_msg_file, $i, null, FT_PEEK);
         $errors = imap_errors();
-        if(count($errors)) {
+        if(is_array($errors) && count($errors)) {
             print_r($errors);
             exit;
         }
@@ -509,7 +509,7 @@ class IMAP extends MAIL
         //    $opts[] = '\Recent';
         $ret = imap_append($this->_c, $stat['path'], $message->getBody(), implode(' ',$opts), $message->getDate());
         $errors = imap_errors());
-        if(count($errors)) {
+        if(is_array($errors) && count($errors)) {
             print_r($errors);
             exit;
         }
