@@ -506,7 +506,7 @@ class IMAP extends MAIL
             $opts[] = '\Draft';
         //if($message->getRecent()) // Recent is a read-only property
         //    $opts[] = '\Recent';
-        $ret = imap_append($this->_c, $stat['check_path'], $message->getBody(), implode(' ',$opts), $message->getDate());
+        $ret = imap_append($this->_c, $stat['path'], $message->getBody(), implode(' ',$opts), $message->getDate());
         print_r(imap_errors());
         return $ret;
 
@@ -601,18 +601,10 @@ class IMAP extends MAIL
     */
     public function pathStat()
     {
-        $res = imap_mailboxmsginfo($this->_c);
-        $ret = array(
-            'date' => $res->Date,
-            'path' => $res->Mailbox,
-            'mail_count' => $res->Nmsgs,
-            'size' => $res->Size,
-        );
         $res = imap_check($this->_c);
-        $ret['check_date'] = $res->Date;
-        $ret['check_mail_count'] = $res->Nmsgs;
-        $ret['check_path'] = $res->Mailbox;
-        // $ret = array_merge($ret,$res);
+        $ret['date'] = $res->Date;
+        $ret['mail_count'] = $res->Nmsgs;
+        $ret['path'] = $res->Mailbox;
         return $ret;
     }
     
