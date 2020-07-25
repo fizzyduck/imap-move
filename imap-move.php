@@ -511,7 +511,7 @@ class IMAP extends MAIL
         //if($message->getRecent()) // Recent is a read-only property
         //    $opts[] = '\Recent';
         $ret = imap_append($this->_c, $stat['path'], $message->getBody(), implode(' ',$opts), $message->getDate());
-        $errors = imap_errors());
+        $errors = imap_errors();
         if(is_array($errors) && count($errors)) {
             print_r($errors);
             exit;
