@@ -234,7 +234,10 @@ class FILE extends MAIL
     {
         $this->_c = null;
         $this->_wipe = $wipe;
-	$this->_c_file = $uri['host'];
+        $this->_c_file = $uri['host'];
+        if(isset($uri['user'])) {
+            $this->_c_file = $uri['user'] . '@' . $this->_c_file;
+        }
         echo "SQLite3:open($this->_c_file)\n";
         $this->_c = new SQLite3($this->_c_file);
         $this->_c->exec('CREATE TABLE IF NOT EXISTS mail(path, message_id, date, subject, body, seen, answered, flagged, draft, recent, deleted, size);');
