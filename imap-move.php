@@ -255,6 +255,7 @@ class FILE extends MAIL
                 'name' => $row['path']
             );
         }
+        return $res;
     }
 
     public function setSubscribed($p, $subscribe = true)
