@@ -258,7 +258,7 @@ class FILE extends MAIL
 
     public function setSubscribed($p, $subscribe = true)
     {
-        $this->_c->query(sprintf('UPDATE mailbox SET subscribed=$d WHERE path=\'$s\'', ($subscribe?1:0), $p));
+        $this->_c->query(sprintf('UPDATE mailbox SET subscribed = %d WHERE path = \'%s\'', ($subscribe?1:0), $p));
     }
     
     public function listPath($pat='*')
