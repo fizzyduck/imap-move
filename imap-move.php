@@ -1,29 +1,29 @@
 #!/usr/bin/php
 <?php
 /**
-    @file
-    @brief Moves Mail from one IMAP account to another
-
-Copyright (C) 2009 Edoceo, Inc
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-Run Like:
-    php ./imap-move.php \
-        --source imap-ssl://userA:secret-password@imap.example.com:993/ \
-        --target imap-ssl://userB:secret-passwrod@imap.example.com:993/sub-folder \
-        [ [ --wipe | --sync ] | --fake | --once ]
-
-    --fake to just list what would be copied
-    --wipe to remove messages after they are copied
-    --once to only copy one e-mail and quit
-    --sync to sync source and target
-
-*/
+ * imap-move is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+ *
+ * imap-move is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with imap-move. If not, see http://www.gnu.org/licenses/.
+ *
+ * Purpose: Moves Mail from one IMAP account to another
+ *
+ * @author Marius Bezuidenhout (marius dot bezuidenhout at gmaill dot com)
+ *
+ * 
+ * Run Like:
+ *    php ./imap-move.php \
+ *        --source imap-ssl://userA:secret-password@imap.example.com:993/ \
+ *        --target imap-ssl://userB:secret-passwrod@imap.example.com:993/sub-folder \
+ *        [ [ --wipe | --sync ] | --fake | --once ]
+ *
+ *    --fake to just list what would be copied
+ *    --wipe to remove messages after they are copied
+ *    --once to only copy one e-mail and quit
+ *    --sync to sync source and target
+ *
+ */
 
 set_time_limit(0);
 error_reporting(E_ALL | E_STRICT);
@@ -260,8 +260,9 @@ class FILE extends MAIL
 
     public function setSubscribed($p, $subscribe = true)
     {
-        $result = $this->_c->query(
-            sprintf('UPDATE mailbox SET subscribed=\'$d\' WHERE path=\'$s\'', ($subscribe?1:0), $p));
+        if($subscribe) {
+            $this->_c->query(sprintf('UPDATE mailbox SET subscribed=\'$d\' WHERE path=\'$s\'', 1, $p));
+        }
     }
     
     public function listPath($pat='*')
@@ -511,11 +512,13 @@ class IMAP extends MAIL
             $opts[] = '\Draft';
         //if($message->getRecent()) // Recent is a read-only property
         //    $opts[] = '\Recent';
-        $ret = imap_append($this->_c, $stat['path'], $message->getBody(), implode(' ',$opts), $message->getDate());
+        $body = $message->getBody();
+        if(strlen($body) > 0) {
+            $ret = imap_append($this->_c, $stat['path'], $body, implode(' ',$opts), $message->getDate());
+        }
         $errors = imap_errors();
         if(is_array($errors) && count($errors)) {
             print_r($errors);
-            exit;
         }
         return $ret;
 
@@ -582,7 +585,7 @@ class IMAP extends MAIL
 		}
 
 		if(!in_array($p, $this->_mailboxes)) {
-            echo "Creating mailbox: " . imap_utf7_encode($imap_full_path);
+            echo "Creating mailbox: " . imap_utf7_encode($imap_full_path) . "\n";
 			imap_createmailbox($this->_c, imap_utf7_encode($imap_full_path));
 			$this->_mailboxes[] = $p;
 		}
