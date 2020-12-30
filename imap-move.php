@@ -829,12 +829,12 @@ class MAIN {
                     $i++;
                     if (!empty($argv[$i])) {
                        $ini_array = parse_ini_file($argv[$i], true);
-                       if ($ini_array['src']['uri']
+                       if ($ini_array['src']['uri'])
                        {
                            echo "Source from config file\n";
                            $this->src = parse_url($ini_array['src']['uri']);
                        }
-                       if ($ini_array['dst']['uri']
+                       if ($ini_array['dst']['uri'])
                        {
                            echo "Target from config file\n";
                            $this->tgt = parse_url($ini_array['dst']['uri']);
