@@ -519,6 +519,10 @@ class IMAP extends MAIL
         //if($message->getRecent()) // Recent is a read-only property
         //    $opts[] = '\Recent';
         $body = $message->getBody();
+        // TODO this should be on a switch
+        if(strlen($body) == 0) {
+            $body = "<empty msg>"; // some IMAP servers will fatally fail if the msg is empty
+        }
         if(strlen($body) > 0) {
             $ret = imap_append($this->_c, $stat['path'], $body, implode(' ',$opts), $message->getDate());
         }
