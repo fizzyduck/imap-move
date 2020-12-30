@@ -828,7 +828,17 @@ class MAIN {
                 case '--config':
                     $i++;
                     if (!empty($argv[$i])) {
-                       $ini_array = parse_ini_file("config.ini", true);
+                       $ini_array = parse_ini_file($argv[$i], true);
+                       if ($ini_array['src']['uri']
+                       {
+                           echo "Source from config file\n";
+                           $this->src = parse_url($ini_array['src']['uri']);
+                       }
+                       if ($ini_array['dst']['uri']
+                       {
+                           echo "Target from config file\n";
+                           $this->tgt = parse_url($ini_array['dst']['uri']);
+                       }
                     }
 
                     break;
@@ -837,16 +847,6 @@ class MAIN {
             	    $i++;
             	    if (!empty($argv[$i])) {
             	        $this->src = parse_url($argv[$i]);
-                        if ($ini_array['src']['user'])
-                        {
-                            echo("Overriding user\n");
-                            $this->src["user"] = $ini_array['src']['user'];
-                        }
-                        if ($ini_array['src']['pass'])
-                        {
-                            echo("Overriding pass\n");
-                            $this->src["pass"] = $ini_array['src']['pass'];
-                        }
             	    }
             	    break;
             	case '--target':
@@ -854,17 +854,6 @@ class MAIN {
             	    $i++;
             	    if (!empty($argv[$i])) {
             	        $this->tgt = parse_url($argv[$i]);
-                        if ($ini_array['dst']['user'])
-                        {
-                            echo("Overriding user\n");
-                            $this->tgt["user"] = $ini_array['st']['user'];
-                        }
-                        if ($ini_array['dst']['pass'])
-                        {
-                            echo("Overriding pass\n");
-                            $this->tgt["pass"] = $ini_array['dst']['pass'];
-                        }
-
             	    }
             	    break;
             	case '--fake':
