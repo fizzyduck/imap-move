@@ -666,7 +666,7 @@ class MAIN {
         $S = $this->_mail_conn($this->src, !$this->wipe);
 
         echo "Connecting Target...\n";
-        $T = $this->_mail_conn($this->tgt);
+        $T = $this->_mail_conn($this->tgt, $this->fake);
 
         $src_path_list = $S->listPath();
         $dst_path_list = $T->listPath();
