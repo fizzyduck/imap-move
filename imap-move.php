@@ -822,13 +822,31 @@ class MAIN {
      */
     function _args($argc,$argv)
     {
+        $ini_array = [];
         for ($i=1;$i<$argc;$i++) {
             switch ($argv[$i]) {
+                case '--config':
+                    $i++;
+                    if (!empty($argv[$i])) {
+                       $ini_array = parse_ini_file("config.ini", true);
+                    }
+
+                    break;
             	case '--source':
             	case '-s':
             	    $i++;
             	    if (!empty($argv[$i])) {
             	        $this->src = parse_url($argv[$i]);
+                        if ($ini_array['src']['user'])
+                        {
+                            echo("Overriding user\n");
+                            $this->src["user"] = $ini_array['src']['user'];
+                        }
+                        if ($ini_array['src']['pass'])
+                        {
+                            echo("Overriding pass\n");
+                            $this->src["pass"] = $ini_array['src']['pass'];
+                        }
             	    }
             	    break;
             	case '--target':
@@ -836,6 +854,17 @@ class MAIN {
             	    $i++;
             	    if (!empty($argv[$i])) {
             	        $this->tgt = parse_url($argv[$i]);
+                        if ($ini_array['dst']['user'])
+                        {
+                            echo("Overriding user\n");
+                            $this->tgt["user"] = $ini_array['st']['user'];
+                        }
+                        if ($ini_array['dst']['pass'])
+                        {
+                            echo("Overriding pass\n");
+                            $this->tgt["pass"] = $ini_array['dst']['pass'];
+                        }
+
             	    }
             	    break;
             	case '--fake':
