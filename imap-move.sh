@@ -13,6 +13,7 @@ for (( i=0; i< ${#users[@]}; i++ )); do
     echo $password
 
     php imap-move.php \
+            --fake \
 	    --source 'imap-tls://'${users[i]}':'$password'@mail.example1.dev:143/' \
 	    --target 'imap-tls://'${users[i]}':'$password'@mail.example2.dev:143/'
 
