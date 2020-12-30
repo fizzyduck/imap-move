@@ -31,6 +31,13 @@
 set_time_limit(0);
 error_reporting(E_ALL | E_STRICT);
 
+// Test that php-imap is installed
+if (!function_exists('imap_open')) {
+    echo "Please install the php imap package.\n";
+    echo "e.g. For Ubuntu: sudo apt-get install php5-imap\n";
+    exit(1);
+}
+
 if($argv === null) { // If $argv is null then use base64 encoded args from $_GET
     $argv = array_keys($_GET);
     $arg_cnt = count($argv);
