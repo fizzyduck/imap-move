@@ -68,6 +68,7 @@ class MESSAGE
 {
     private $_message_id;
     private $_date;
+    private $_datestr;
     private $_subject;
     private $_body;
     private $_seen;
@@ -104,6 +105,16 @@ class MESSAGE
     public function getDate()
     {
         return gmstrftime('%d-%b-%Y %H:%M:%S +0000', $this->_date);
+    }
+    public function setDateStr($date)
+    {
+        $this->_datestr = $date;
+        return $this;
+    }
+    
+    public function getDateStr()
+    {
+        return $this->_datestr;
     }
     
     public function setSubject($subject)
@@ -543,8 +554,30 @@ class IMAP extends MAIL
     public function mailStat($i, $message = null)
     {
         if(!$message instanceof MESSAGE)
+        {
             $message = new MESSAGE();
-        $head = imap_headerinfo($this->_c,$i);
+            $head = imap_headerinfo($this->_c,$i);
+            if ($head === false)
+            {
+               echo "\nFailed retrieving header for ".$i."\n";
+               return FALSE;
+            }
+        }
+        else
+        {
+            $search='SUBJECT "'.$message->getSubject().'" ON "'.$message->getDateStr().'"';
+            //echo "Searching for ".$search."\n";
+            $result = imap_search($this->_c, 'SUBJECT "'.$message->getSubject().'" ON "'.$message->getDateStr().'"');
+            if ($result === FALSE)
+               return FALSE;
+
+            if (count($result) != 1) die("Couldn't match");
+
+            $message = $this->mailStat($result[0]);
+            return $message;
+        }
+
+        $message->setDateStr($head->MailDate);
         $message->setDate(strtotime($head->MailDate))
             ->setSeen($head->Unseen != 'U')
             ->setAnswered(($head->Answered == 'A'))
@@ -560,6 +593,7 @@ class IMAP extends MAIL
         if((property_exists($head, 'message_id'))) {
             $message->setMessageId($head->message_id);
         }
+
         if($head->Recent == 'R') {
             $message->setSeen(true)
                 ->setRecent(true);
@@ -713,7 +747,7 @@ class MAIN {
             echo "T: Indexing:       ";
             $tgt_mail_list = array();
             $tgt_mail_list_no_subject = array();
-            for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
+/*            for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
                 echo "\033[6D";
                 echo str_pad($i, 6, ' ', STR_PAD_RIGHT);
                 $message = $T->mailStat($i);
@@ -722,6 +756,7 @@ class MAIN {
                 else
                     $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
             }
+*/
             echo "\n";
             // print_r($tgt_mail_list);
             // for ($i=1;$i<=$src_path_stat['mail_count'];$i++) {
@@ -731,14 +766,40 @@ class MAIN {
             $src_mail_list_no_subject = array();
             for ($i=$src_path_stat['mail_count'];$i>=1;$i--) {
                 $message = $S->mailStat($i);
+                if (true)
+                {
+                    $searchmessage = new MESSAGE();
+                    $searchmessage->setSubject($message->getSubject());
+                    $searchmessage->setDateStr($message->getDateStr());
+                    $foundmessage = $T->mailStat(null, $searchmessage);
+
+                    if ($foundmessage !== FALSE) {
+                        //echo "\nSource: Mail: {$message->getSubject()} Copied Already\n";
+                        $skipped++;
+                        self::print_progress($copied, $skipped);
+                        if(!$this->fake && $this->wipe)
+                            $S->mailWipe($i);
+                        continue;
+                    }
+                    else
+                    {
+                        //echo "\nSource: Mail: {$message->getSubject()} Not found on target\n";
+
+                    }
                 
+                }
+                else
+                {
+
+
                 if(strlen($message->getMessageId()) > 0 ) {
                     $src_mail_list[ $message->getMessageId() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
-                    if (array_key_exists($message->getMessageId(), $tgt_mail_list)) {
+                    $exists = array_key_exists($message->getMessageId(), $tgt_mail_list);
+                    if ($exists) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
                         self::print_progress($copied, $skipped);
-                        if($this->wipe)
+                        if(!$this->fake && $this->wipe)
                             $S->mailWipe($i);
                         continue;
                     }
@@ -749,10 +810,11 @@ class MAIN {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
                         self::print_progress($copied, $skipped);
-                        if($this->wipe)
+                        if(!$this->fake && $this->wipe)
                             $S->mailWipe($i);
                         continue;
                     }
+                }
                 }
 
                 // echo "S: {$message->getSubject()} {$message->getDate()}\n";
@@ -763,13 +825,14 @@ class MAIN {
                 //if(!$message instanceof MESSAGE)
                 //    continue;
 
+                    $copied++;
+
                 if ($this->fake) {
                     continue;
                 }
                 
                 $res = $T->mailPut($message);
                 // echo "T: $res\n";
-                $copied++;
                 self::print_progress($copied, $skipped);
                 if(($copied % 20) == 0)
                     if( ob_get_level() > 0 ) ob_flush();
@@ -783,8 +846,17 @@ class MAIN {
                 }
 
             }
-            
-            echo "\nCopied $copied messages to $tgt_path \n";
+            if ($this->fake)
+               echo "\nDry run ";
+            else
+               echo "\n";
+
+            echo "Copied $copied messages to $tgt_path";
+            if ($this->fake)
+               echo "\nDry run ";
+            else
+               echo "\n";
+
             echo "Skipped $skipped messages \n";
 
             if(!$this->fake && in_array($path['name'], $src_subscribed_list) && !in_array($path['name'], $dst_subscribed_list)) {
