@@ -407,7 +407,7 @@ class IMAP extends MAIL
     /**
         Connect to an IMAP
     */
-    public function __construct($uri, $wipe = false, $readonly = false)
+    public function __construct($uri, $wipe = false, $readonly = false, $quiet = false)
     {
         $this->_c = null;
         $this->_wipe = $wipe;
@@ -436,7 +436,7 @@ class IMAP extends MAIL
                 $this->_c_base = $x;
             }
         }
-        echo "imap_open($this->_c_host)\n";
+        if (!$quiet) echo "imap_open($this->_c_host)\n";
         $this->_c = imap_open($this->_c_host,$uri['user'],base64_decode($uri['pass']));
         if(!is_resource($this->_c)) {
             echo implode(', ',imap_errors());
@@ -682,6 +682,7 @@ class MAIN {
     private $wipe;
     private $once;
     private $sync;
+    private $quiet;
 
     public function __construct($argc, $argv)
     {
@@ -691,15 +692,16 @@ class MAIN {
         $once = false;
         $wipe = false;
         $sync = false;
+        $quiet = false;
         $this->_args($argc,$argv);
     }
 
     public function run() {
 
-        echo "Connecting Source...\n";
+        $this->log("Connecting Source...\n");
         $S = $this->_mail_conn($this->src, !$this->wipe);
 
-        echo "Connecting Target...\n";
+        $this->log("Connecting Target...\n");
         $T = $this->_mail_conn($this->tgt, $this->fake);
 
         $src_path_list = $S->listPath();
@@ -707,16 +709,16 @@ class MAIN {
         $src_subscribed_list = $S->getSubscribed();
         $dst_subscribed_list = $T->getSubscribed();
 
-        echo "Source subscribed list: " . implode(", ", $src_subscribed_list) . "\n";
-        echo "Target subscribed list: " . implode(", ", $dst_subscribed_list) . "\n";
+        $this->log("Source subscribed list: " . implode(", ", $src_subscribed_list) . "\n");
+        $this->log("Target subscribed list: " . implode(", ", $dst_subscribed_list) . "\n");
 
         foreach ($src_path_list as $path) {
 
-            echo "S: path {$path['name']} = {$path['attribute']}\n";
+            $this->log("S: path {$path['name']} = {$path['attribute']}\n");
 
             // Skip Logic Below
             if ($this->_path_skip($path)) {
-                echo "S: skip {$path['name']}\n";
+                $this->log("S: skip {$path['name']}\n");
                 continue;
             }
 
@@ -724,9 +726,9 @@ class MAIN {
             $S->setPath($path['name']);
             $src_path_stat = $S->pathStat();
             
-            echo "S: {$src_path_stat['mail_count']} messages\n";
+            $this->log("S: {$src_path_stat['mail_count']} messages\n");
             if (empty($src_path_stat['mail_count'])) {
-                echo "S: skip\n";
+                $this->log("S: skip\n");
                 continue;
             }
 
@@ -741,13 +743,14 @@ class MAIN {
 
             // Show info on Target
             $tgt_path_stat = $T->pathStat();
-            echo "T: {$tgt_path_stat['mail_count']} messages\n";
+            $this->log("T: {$tgt_path_stat['mail_count']} messages\n");
 
             // Build Index of Target
-            echo "T: Indexing:       ";
             $tgt_mail_list = array();
             $tgt_mail_list_no_subject = array();
-/*            for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
+/*
+            $this->log("T: Indexing:       ");
+            for ($i=1;$i<=$tgt_path_stat['mail_count'];$i++) {
                 echo "\033[6D";
                 echo str_pad($i, 6, ' ', STR_PAD_RIGHT);
                 $message = $T->mailStat($i);
@@ -756,8 +759,8 @@ class MAIN {
                 else
                     $tgt_mail_list_no_subject[ $message->getDate() ] = array('Subject' => $message->getSubject(), 'Date' => $message->getDate(), 'Position' => $i);
             }
-*/
             echo "\n";
+*/
             // print_r($tgt_mail_list);
             // for ($i=1;$i<=$src_path_stat['mail_count'];$i++) {
             $copied = 0;
@@ -776,7 +779,7 @@ class MAIN {
                     if ($foundmessage !== FALSE) {
                         //echo "\nSource: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
-                        self::print_progress($copied, $skipped);
+                        $this->print_progress($copied, $skipped);
                         if(!$this->fake && $this->wipe)
                             $S->mailWipe($i);
                         continue;
@@ -798,7 +801,7 @@ class MAIN {
                     if ($exists) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
-                        self::print_progress($copied, $skipped);
+                        $this->print_progress($copied, $skipped);
                         if(!$this->fake && $this->wipe)
                             $S->mailWipe($i);
                         continue;
@@ -809,7 +812,7 @@ class MAIN {
                     if (array_key_exists($message->getDate(), $tgt_mail_list_no_subject)) {
                         //echo "Source: Mail: {$message->getSubject()} Copied Already\n";
                         $skipped++;
-                        self::print_progress($copied, $skipped);
+                        $this->print_progress($copied, $skipped);
                         if(!$this->fake && $this->wipe)
                             $S->mailWipe($i);
                         continue;
@@ -833,7 +836,7 @@ class MAIN {
                 
                 $res = $T->mailPut($message);
                 // echo "T: $res\n";
-                self::print_progress($copied, $skipped);
+                $this->print_progress($copied, $skipped);
                 if(($copied % 20) == 0)
                     if( ob_get_level() > 0 ) ob_flush();
                 if($this->wipe)
@@ -847,17 +850,17 @@ class MAIN {
 
             }
             if ($this->fake)
-               echo "\nDry run ";
+               $this->log("\nDry run ");
             else
-               echo "\n";
+               $this->log("\n");
 
-            echo "Copied $copied messages to $tgt_path";
+            $this->log("Copied $copied messages to $tgt_path");
             if ($this->fake)
-               echo "\nDry run ";
+               $this->log("\nDry run ");
             else
-               echo "\n";
+               $this->log("\n");
 
-            echo "Skipped $skipped messages \n";
+            $this->log("Skipped $skipped messages \n");
 
             if(!$this->fake && in_array($path['name'], $src_subscribed_list) && !in_array($path['name'], $dst_subscribed_list)) {
                 $T->setSubscribed($path['name']);
@@ -880,13 +883,19 @@ class MAIN {
                         $deleted++;
                     }
                 }
-                echo "Deleted $deleted messages \n";
+                $this->log("Deleted $deleted messages \n");
             }
             
         }
 
         $S->close();
         $T->close();
+    }
+
+    function log($msg)
+    {
+        if (!$this->quiet)
+           echo $msg;
     }
 
     /**
@@ -903,12 +912,12 @@ class MAIN {
                        $ini_array = parse_ini_file($argv[$i], true);
                        if ($ini_array['src']['uri'])
                        {
-                           echo "Source from config file\n";
+                           $this->log("Source from config file\n");
                            $this->src = parse_url($ini_array['src']['uri']);
                        }
                        if ($ini_array['dst']['uri'])
                        {
-                           echo "Target from config file\n";
+                           $this->log("Target from config file\n");
                            $this->tgt = parse_url($ini_array['dst']['uri']);
                        }
                     }
@@ -939,6 +948,9 @@ class MAIN {
                     break;
                 case '--sync':
                     $this->sync = true;
+                    break;
+                case '--quiet':
+                    $this->quiet = true;
                     break;
             	default:
             	    echo "arg: {$argv[$i]}\n";
@@ -989,7 +1001,7 @@ class MAIN {
         switch(strtolower(@$uri['scheme'])) {
         	case 'imap-ssl':
         	case 'imap-tls':
-        	    return new IMAP($uri, $this->wipe, $readonly);
+        	    return new IMAP($uri, $this->wipe, $readonly, $this->quiet);
         	    break;
         	case 'file':
         	    return new FILE($uri, $this->wipe);
@@ -1022,11 +1034,14 @@ class MAIN {
             , $message);
     }
 
-    public static function print_progress($copied, $skipped)
+    public function print_progress($copied, $skipped)
     {
-        // Copied: ...... Skipped: ......
-        echo "\033[30D";
-        echo "Copied: " . str_pad($copied, 6, ' ', STR_PAD_RIGHT) . " Skipped: " . str_pad($skipped, 6, ' ', STR_PAD_RIGHT);        
+        if (!$this->quiet)
+        {
+            // Copied: ...... Skipped: ......
+            echo "\033[30D";
+            echo "Copied: " . str_pad($copied, 6, ' ', STR_PAD_RIGHT) . " Skipped: " . str_pad($skipped, 6, ' ', STR_PAD_RIGHT);        
+        }
     }
 }
 
