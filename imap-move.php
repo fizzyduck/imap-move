@@ -566,6 +566,7 @@ class IMAP extends MAIL
         else
         {
             $subject = $message->getSubject();
+            // TODO this needs to change to using Q encoding eg =22 for "
             if (strpos($subject, '"') === false)
             {
                 $search='SUBJECT "'.$subject.'" ON "'.$message->getDateStr().'"';
