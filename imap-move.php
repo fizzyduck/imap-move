@@ -570,8 +570,8 @@ class IMAP extends MAIL
             if (strpos($subject, '"') === false)
             {
                 $search='SUBJECT "'.$subject.'" ON "'.$message->getDateStr().'"';
-                echo "Searching for ".$search."\n";
-                $result = imap_search($this->_c, 'SUBJECT "'.$subject.'" ON "'.$message->getDateStr().'"');
+                //echo "Searching for ".$search."\n";
+                $result = imap_search($this->_c, $search);
                 if ($result === FALSE)
                    return FALSE;
             }
