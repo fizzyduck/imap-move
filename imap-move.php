@@ -396,6 +396,9 @@ class FILE extends MAIL
     public function close()
     {
         $this->_c->close();
+        // TODO do this in parent class
+        if(file_exists($this->_tmp_msg_file))
+            unlink($this->_tmp_msg_file);
     }
 }
 
@@ -569,7 +572,10 @@ class IMAP extends MAIL
             // TODO this needs to change to using Q encoding eg =22 for "
             if (strpos($subject, '"') === false)
             {
-                $search='SUBJECT "'.$subject.'" ON "'.$message->getDateStr().'"';
+                if (strlen($subject) > 0)
+                    $search='SUBJECT "'.$subject.'" ON "'.$message->getDateStr().'"';
+                else
+                    $search='ON "'.$message->getDateStr().'"';
                 //echo "Searching for ".$search."\n";
                 $result = imap_search($this->_c, $search);
                 if ($result === FALSE)
@@ -580,9 +586,11 @@ class IMAP extends MAIL
 //                echo "Searching for ".$subject."\n";
                return FALSE;
             }
+$cnt=count($result);
+            if ($cnt < 1) {
+die("Couldn't match $cnt - $subject");
 
-            if (count($result) != 1) die("Couldn't match");
-
+}
             $message = $this->mailStat($result[0]);
             return $message;
         }
@@ -714,6 +722,7 @@ class MAIN {
         $this->log("Connecting Target...\n");
         $T = $this->_mail_conn($this->tgt, $this->fake);
 
+        try {
         $src_path_list = $S->listPath();
         $dst_path_list = $T->listPath();
         $src_subscribed_list = $S->getSubscribed();
@@ -778,6 +787,7 @@ class MAIN {
             $src_mail_list = array();
             $src_mail_list_no_subject = array();
             for ($i=$src_path_stat['mail_count'];$i>=1;$i--) {
+                $this->log("Stat $i\n");
                 $message = $S->mailStat($i);
                 if (true)
                 {
@@ -797,7 +807,7 @@ class MAIN {
                     else
                     {
                         //echo "\nSource: Mail: {$message->getSubject()} Not found on target\n";
-
+                        $this->log("Source: Mail: {$message->getSubject()} {$message->getDate()} Not found on target, will move\n");
                     }
                 
                 }
@@ -855,6 +865,7 @@ class MAIN {
                 if ($this->once) {
                     $S->close();
                     $T->close();
+                    $this->log("Executed once, exiting");
                     die("--one and done\n");
                 }
 
@@ -897,9 +908,12 @@ class MAIN {
             }
             
         }
-
-        $S->close();
-        $T->close();
+        }
+        finally {
+            $this->log("Closing connections\n");
+            $S->close();
+            $T->close();
+        }
     }
 
     function log($msg)
