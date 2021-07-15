@@ -62,7 +62,46 @@ if($argv === null) { // If $argv is null then use base64 encoded args from $_GET
 
 $prog = new MAIN($arg_cnt, $arg_vrs);
 
-$prog->run();
+$lastsuccess = load_last_success();
+
+try
+{
+   $prog->run();
+   save_last_success(time());
+
+}
+catch (Exception $e)
+{
+   $grace = 1800;
+   if (time() - $lastsuccess > $grace)
+   {
+      print "Unable to sync for more than $grace seconds\n";
+      print "------\n";
+      print "Last exception:\n";
+      throw $e;
+   }
+}
+
+
+function load_last_success()
+{
+   if (file_exists( __DIR__."/lastsuccess.txt"))
+   {
+       $file_contents = file_get_contents( __DIR__."/lastsuccess.txt" );
+   }
+   else
+       $file_contents = 0;
+   if (!$file_contents)
+       return 0;
+   else
+       return $file_contents;
+}
+
+function save_last_success($number)
+{
+   file_put_contents(__DIR__."/lastsuccess.txt", $number);
+}
+
 
 class MESSAGE
 {
@@ -440,11 +479,10 @@ class IMAP extends MAIL
             }
         }
         if (!$quiet) echo "imap_open($this->_c_host)\n";
-        $this->_c = imap_open($this->_c_host,$uri['user'],base64_decode($uri['pass']));
+        $this->_c = @imap_open($this->_c_host,$uri['user'],base64_decode($uri['pass']));
         if(!is_resource($this->_c)) {
-            echo implode(', ',imap_errors());
-            echo "Could not open " . $this->_c_host;
-            exit;
+            $error = @implode(', ',imap_errors()) . " " . "Could not open " . $this->_c_host;
+            throw new Exception($error);
         }
         parent::__construct();
     }
